@@ -199,7 +199,7 @@ def response_generator():
         yield word + " "
         time.sleep(0.05)
 
-def main():
+def main_chat():
 
     with st.expander("RAG Parameters:"):
         st.write(f"**LLM**: {llm_model}")
@@ -337,4 +337,4 @@ def main():
             
         
 if __name__ == '__main__':
-    main()
+    main_chat()

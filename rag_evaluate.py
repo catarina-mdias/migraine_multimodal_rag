@@ -211,7 +211,7 @@ def response_generator():
         yield word + " "
         time.sleep(0.05)
 
-def main():
+def main_eval():
 
     with st.expander("RAG Parameters:"):
         st.write(f"**LLM**: {llm_model}")
@@ -437,4 +437,4 @@ def main():
                      3. Generate the RAG system answers by clicking 'Generate responses'.""")
 
 if __name__ == '__main__':
-    main()
+    main_eval()

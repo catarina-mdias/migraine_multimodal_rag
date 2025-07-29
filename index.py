@@ -248,7 +248,7 @@ def call_index():
     ## Save data temporarily - Might be replaced by DB
     save_to_pickle(docs, buffer_docs)
 
-def main():
+def main_index():
 
     # Directory to store uploaded PDFs
     os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -292,4 +292,4 @@ def main():
         call_index()
 
 if __name__ == '__main__':
-    main()
+    main_index()
