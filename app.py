@@ -1,5 +1,6 @@
 import streamlit as st
 from index import main_index
+from index_image import main_image_index  # <-- new import
 from chat import main_chat
 from rag_evaluate import main_eval
 
@@ -10,14 +11,18 @@ llm = ChatOpenAI(model=LLM_MODEL, api_key=api_key)
 
 # Sidebar navigation
 st.sidebar.title("Migraine Assistant")
-page = st.sidebar.radio("Choose a page", ["📄 Upload & Index", "💬 Chatbot", "📊 Evaluate"])
+page = st.sidebar.radio("Choose a page", [
+    "📄 Upload PDFs",
+    "🖼️ Upload Images",
+    "💬 Chatbot",
+    "📊 Evaluate"
+])
 
-# Load environment variables, setup, shared configs
-# ... (add shared imports, setup OpenAI key, models, vector store, etc.)
-
-# Load content based on selected page
-if page == "📄 Upload & Index":
+# Load page content
+if page == "📄 Upload PDFs":
     main_index(llm)
+elif page == "🖼️ Upload Images":
+    main_image_index(llm)  # <-- call the new one
 elif page == "💬 Chatbot":
     main_chat()
 elif page == "📊 Evaluate":

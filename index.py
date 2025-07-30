@@ -1,8 +1,5 @@
 import os
 import streamlit as st
-from PIL import Image
-import base64
-import io
 
 from langchain_core.documents import Document
 
@@ -16,23 +13,6 @@ from utils.utils import (
     base64_image_to_markdown,
     save_to_pickle
 )
-
-# -----------------------------
-# Helper: Process a single image file (.jpg)
-# -----------------------------
-def process_image_to_document(image_path: str, llm) -> Document:
-    """Convert a JPG image to a LangChain Document using OCR + LLM."""
-    with open(image_path, "rb") as img_file:
-        image_bytes = img_file.read()
-        base64_str = base64.b64encode(image_bytes).decode("utf-8")
-
-    with st.spinner(f"{image_path} - Extracting text..."):
-        text = base64_image_to_markdown(base64_str, llm)
-
-    return Document(
-        page_content=text,
-        metadata={"source": os.path.basename(image_path)}
-    )
 
 # -----------------------------
 # Helper: Process a single PDF file
@@ -59,52 +39,52 @@ def call_index(llm):
     except FileNotFoundError:
         pass
 
-    files = [f for f in os.listdir(UPLOAD_DIR) if f.lower().endswith((".pdf", ".jpg", ".jpeg"))]
+    pdf_files = [f for f in os.listdir(UPLOAD_DIR) if f.lower().endswith(".pdf")]
     all_docs = []
 
-    for file in files:
-        path = os.path.join(UPLOAD_DIR, file)
-        st.info(f"Processing `{file}`")
-
-        if file.lower().endswith(".pdf"):
-            docs = process_pdf_to_documents(path, llm)
-            all_docs.extend(docs)
-        elif file.lower().endswith((".jpg", ".jpeg")):
-            doc = process_image_to_document(path, llm)
-            all_docs.append(doc)
+    for pdf_file in pdf_files:
+        path = os.path.join(UPLOAD_DIR, pdf_file)
+        st.info(f"Processing `{pdf_file}`")
+        docs = process_pdf_to_documents(path, llm)
+        all_docs.extend(docs)
 
     save_to_pickle(all_docs, BUFFER_DOCS_PATH)
-    st.success(f"Indexed {len(all_docs)} document page(s).")
+    st.success(f"Indexed {len(all_docs)} PDF page(s).")
 
 # -----------------------------
 # Streamlit Interface
 # -----------------------------
 def main_index(llm):
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    st.title("📄 PDF & JPG Upload and Indexing - Tutai")
+    st.title("📄 PDF Submission")
+    st.markdown("""
+This page allows you to **submit medical PDFs related to migraines**, such as:
+- Clinical summaries
+- Lab results
+- Medication instruction leaflets
 
-    uploaded_file = st.file_uploader("Upload a PDF or JPG file", type=["pdf", "jpg", "jpeg"])
+The assistant will extract relevant content from your PDFs for later search and analysis.
+""")
+
+    uploaded_file = st.file_uploader("Upload a PDF file", type=["pdf"])
 
     if uploaded_file is not None:
         st.success(f"Uploaded: {uploaded_file.name} ({uploaded_file.size / 1024:.2f} KB)")
-        if st.button("Save File"):
+        if st.button("Save PDF"):
             save_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
             with open(save_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
             st.info(f"File saved to: `{save_path}`")
 
-    if os.path.exists(UPLOAD_DIR):
-        files = [f for f in os.listdir(UPLOAD_DIR) if f.lower().endswith((".pdf", ".jpg", ".jpeg"))]
-        if files:
-            st.write(f"Found {len(files)} file(s):")
-            for file in sorted(files):
-                st.markdown(f"- 🗂️ `{file}`")
-        else:
-            st.info("No PDF or JPG files found in the upload folder.")
+    pdf_files = [f for f in os.listdir(UPLOAD_DIR) if f.lower().endswith(".pdf")]
+    if pdf_files:
+        st.write(f"Found {len(pdf_files)} PDF file(s):")
+        for file in sorted(pdf_files):
+            st.markdown(f"- 📄 `{file}`")
     else:
-        st.warning(f"The folder `{UPLOAD_DIR}` does not exist.")
+        st.info("No PDF files found in the upload folder.")
 
-    if st.button("Index Files"):
+    if st.button("Index PDF Files"):
         call_index(llm)
 
 # -----------------------------
