@@ -1,92 +1,48 @@
 import os
-from dotenv import load_dotenv
-import uuid
+import pickle
 import base64
 import io
 import re
-import pickle
 import time
-import json
-
-
-
-import streamlit as st
-import streamlit.components.v1 as components
-
-## Providers
-from langchain_openai import ChatOpenAI
+import fitz  # PyMuPDF
+from PIL import Image
+from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from openai import OpenAI
-from langchain_openai import OpenAIEmbeddings
-from langchain_core.vectorstores import InMemoryVectorStore
-from langchain import hub
-from langchain import hub
-from langchain_core.documents import Document
-from typing_extensions import List, TypedDict, Tuple
-from langgraph.graph import START, StateGraph
+import streamlit.components.v1 as components
+
+from utils.constants import (
+    TTS_OUTPUT_PATH,
+    TTS_MODEL,
+    TTS_VOICE,
+    QUERY_OCR
+)
+
+# Initialize OpenAI client once
+client = OpenAI()
 
 
-def stt_util(audio):
-    transcript = ''
+# -------------------------
+# Pickle Utilities
+# -------------------------
 
-    if audio:
-        transcript = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio
-        )
+def save_to_pickle(obj, filepath):
+    """Save any object to a pickle file."""
+    with open(filepath, "wb") as f:
+        pickle.dump(obj, f)
 
-    return transcript.text
-
-
-def llm_completion(input_text):
-    output_text = ''
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": input_text}],
-        temperature=0,
-    )
-
-    output_text = response.choices[0].message.content
-
-    return output_text
+def load_from_pickle(filepath):
+    """Load object from a pickle file."""
+    with open(filepath, "rb") as f:
+        return pickle.load(f)
 
 
-def tts_util(input_text):
-    speech_file_path = "answer.mp3"
-
-    # Check if the file exists, then remove it
-    if os.path.exists(speech_file_path):
-        os.remove(speech_file_path)
-
-    with client.audio.speech.with_streaming_response.create(
-            model="gpt-4o-mini-tts",
-            voice="alloy",
-            input=input_text
-    ) as response:
-        response.stream_to_file(speech_file_path)
-
-    return speech_file_path
-
-
-def autoplay_audio(file_path: str):
-    with open(file_path, "rb") as f:
-        data = f.read()
-        b64 = base64.b64encode(data).decode()
-
-        audio_html = f"""
-                <audio id="player" controls autoplay>
-                    <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
-                </audio>
-                <script>
-                    var audio = document.getElementById("player");
-                    audio.play();
-                </script>
-                """
-        components.html(audio_html, height=100)
-
+# -------------------------
+# PDF & OCR Utilities
+# -------------------------
 
 def pdf_to_base64_images(pdf_path: str) -> list[str]:
+    """Convert each page of a PDF to a base64-encoded image string."""
     pdf_document = fitz.open(pdf_path)
     base64_images = []
 
@@ -98,60 +54,90 @@ def pdf_to_base64_images(pdf_path: str) -> list[str]:
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
         base64_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
-
         base64_images.append(base64_image)
 
     return base64_images
 
-
-def display_base64_image(base64_str, caption=""):
-    image_html = f'<img src="data:image/png;base64,{base64_str}" width="800"/>'
-    st.markdown(image_html, unsafe_allow_html=True)
-    if caption:
-        st.caption(caption)
-
-
 def clean_markdown_fences(text: str) -> str:
-    # Remove triple backticks with optional language specifier
-    cleaned = re.sub(r"```(?:\w+)?\n?", "", text)
-    return cleaned.strip()
+    """Remove triple backticks and optional language specifier from markdown."""
+    return re.sub(r"```(?:\w+)?\n?", "", text).strip()
 
-
-def base64_image_to_markdown(base64_str):
-    query = """Extract all the text in the image as a markdown, including tables, headers and plain text.
-    If you see any author or writer names, include a header saying "Authors"
-    If you find and image such as a diagram or other sort, create a description of the image.
-    Do not use the word 'Markdown' or wrap the output in triple backticks. Avoid any code or markup formatting.
-    markdown:
-    """
-
+def base64_image_to_markdown(base64_str: str, llm) -> str:
+    """Send base64 image and prompt to LLM and return markdown output."""
     message = HumanMessage(
         content=[
-            {"type": "text", "text": query},
+            {"type": "text", "text": QUERY_OCR},
             {
                 "type": "image_url",
                 "image_url": {"url": f"data:image/jpeg;base64,{base64_str}"},
             },
         ],
     )
-    response_temp = llm.invoke([message])
-    response = clean_markdown_fences(response_temp.content)
-
-    return response
+    response = llm.invoke([message])
+    return clean_markdown_fences(response.content)
 
 
-def save_to_pickle(obj, filepath):
-    with open(filepath, "wb") as f:
-        pickle.dump(obj, f)
+# -------------------------
+# Audio Utilities
+# -------------------------
+
+def stt_util(audio) -> str:
+    """Transcribe audio input to text using Whisper."""
+    if not audio:
+        return ""
+    transcript = client.audio.transcriptions.create(
+        model="whisper-1",
+        file=audio
+    )
+    return transcript.text
+
+def llm_completion(input_text: str) -> str:
+    """Send a prompt to GPT and return its response."""
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": input_text}],
+        temperature=0,
+    )
+    return response.choices[0].message.content
+
+def tts_util(input_text: str) -> str:
+    """Convert text to speech and save to MP3."""
+    if os.path.exists(TTS_OUTPUT_PATH):
+        os.remove(TTS_OUTPUT_PATH)
+
+    with client.audio.speech.with_streaming_response.create(
+        model=TTS_MODEL,
+        voice=TTS_VOICE,
+        input=input_text
+    ) as response:
+        response.stream_to_file(TTS_OUTPUT_PATH)
+
+    return TTS_OUTPUT_PATH
+
+def autoplay_audio(file_path: str):
+    """Stream audio file with autoplay in Streamlit."""
+    with open(file_path, "rb") as f:
+        data = f.read()
+        b64 = base64.b64encode(data).decode()
+
+    audio_html = f"""
+        <audio id="player" controls autoplay>
+            <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+        </audio>
+        <script>
+            var audio = document.getElementById("player");
+            audio.play();
+        </script>
+    """
+    components.html(audio_html, height=100)
 
 
-def load_from_pickle(filepath):
-    with open(filepath, "rb") as f:
-        return pickle.load(f)
+# -------------------------
+# Streamlit Helpers
+# -------------------------
 
-
-# Streamed response emulator
 def response_generator():
+    """Yields word-by-word response streaming for UI."""
     for word in st.session_state.temp_answer.split():
         yield word + " "
         time.sleep(0.05)
