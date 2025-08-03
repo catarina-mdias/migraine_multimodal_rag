@@ -1,6 +1,8 @@
 import os
 import streamlit as st
 import pickle
+import base64
+import time
 
 from langchain_core.documents import Document
 
@@ -15,6 +17,7 @@ from utils.utils import (
     save_to_pickle
 )
 
+
 # -----------------------------
 # Load previously saved docs
 # -----------------------------
@@ -24,8 +27,9 @@ def load_existing_docs(pickle_path):
             return pickle.load(f)
     return []
 
+
 # -----------------------------
-# Helper: Process a single PDF file
+# PDF: Process a single PDF file
 # -----------------------------
 def process_pdf_to_documents(pdf_path: str, llm) -> list[Document]:
     docs = []
@@ -40,8 +44,26 @@ def process_pdf_to_documents(pdf_path: str, llm) -> list[Document]:
             ))
     return docs
 
+
 # -----------------------------
-# Indexing Entry Point
+# JPG: Process image to Document
+# -----------------------------
+def process_image_to_document(image_path: str, llm) -> Document:
+    with open(image_path, "rb") as img_file:
+        image_bytes = img_file.read()
+        base64_str = base64.b64encode(image_bytes).decode("utf-8")
+
+    with st.spinner(f"{os.path.basename(image_path)} - Extracting text..."):
+        text = base64_image_to_markdown(base64_str, llm)
+
+    return Document(
+        page_content=text,
+        metadata={"source": os.path.basename(image_path)}
+    )
+
+
+# -----------------------------
+# Unified Indexing
 # -----------------------------
 def call_index(llm, just_uploaded_files: list[str]):
     existing_docs = load_existing_docs(BUFFER_DOCS_PATH)
@@ -49,11 +71,20 @@ def call_index(llm, just_uploaded_files: list[str]):
 
     all_new_docs = []
 
-    for pdf_file in just_uploaded_files:
-        if pdf_file in existing_sources:
+    for file_name in just_uploaded_files:
+        if file_name in existing_sources:
             continue  # Skip already indexed
-        path = os.path.join(UPLOAD_DIR, pdf_file)
-        docs = process_pdf_to_documents(path, llm)
+
+        path = os.path.join(UPLOAD_DIR, file_name)
+
+        if file_name.lower().endswith(".pdf"):
+            docs = process_pdf_to_documents(path, llm)
+        elif file_name.lower().endswith((".jpg", ".jpeg")):
+            doc = process_image_to_document(path, llm)
+            docs = [doc]
+        else:
+            continue  # Unsupported file type
+
         all_new_docs.extend(docs)
 
     if all_new_docs:
@@ -62,27 +93,31 @@ def call_index(llm, just_uploaded_files: list[str]):
 
     return len(all_new_docs)
 
+
 # -----------------------------
 # Streamlit Interface
 # -----------------------------
 def main_index(llm):
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    st.title("📄 PDF Submission")
+    st.title("Document & Image Submission")
+
     st.markdown("""
-This page allows you to **submit medical PDFs related to migraines**, such as:
+This page allows you to **submit medical PDFs and JPG images related to migraines**, such as:
 - Clinical summaries
 - Lab results
 - Medication instruction leaflets
-
-The assistant will extract relevant content from your PDFs for later search and analysis.
+- Photos of handwritten notes or medication labels
 """)
 
-    uploaded_files = st.file_uploader("Upload Documents", type=["pdf"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader(
+        "Upload Documents (PDF, JPG)",
+        type=["pdf", "jpg", "jpeg"],
+        accept_multiple_files=True
+    )
 
     if uploaded_files:
         if st.button("Upload"):
             uploaded_names = []
-
             for uploaded_file in uploaded_files:
                 save_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
                 with open(save_path, "wb") as f:
@@ -94,97 +129,28 @@ The assistant will extract relevant content from your PDFs for later search and 
             if num_new_docs > 0:
                 st.success(f"Uploaded {len(uploaded_names)} new document(s).")
             else:
-                st.info("All uploaded documents were already indexed.")
+                st.info("All uploaded files were already indexed.")
 
-        # --- Always show Current Documents header ---
-    st.markdown("### 🗂️ Current Documents:")
+    # Always show file list
+    st.markdown("### Current Uploaded Files:")
 
-    # --- Load current uploaded PDFs ---
-    pdf_files = [f for f in os.listdir(UPLOAD_DIR) if f.lower().endswith(".pdf")]
-
-    if pdf_files:
-        for file in sorted(pdf_files):
+    all_files = [f for f in os.listdir(UPLOAD_DIR) if f.lower().endswith((".pdf", ".jpg", ".jpeg"))]
+    if all_files:
+        for file in sorted(all_files):
             st.markdown(f"- `{file}`")
     else:
         st.info("No uploaded documents found.")
 
-    # --- Delete Documents Button (disabled if no PDFs) ---
-    delete_disabled = len(pdf_files) == 0
-    if st.button("🗑️ Delete Documents", disabled=delete_disabled):
-        # Delete in-memory docs file
+    # Delete section
+    delete_disabled = len(all_files) == 0
+    if st.button("Delete All Files", disabled=delete_disabled):
         if os.path.exists(BUFFER_DOCS_PATH):
             os.remove(BUFFER_DOCS_PATH)
-        # Delete uploaded PDFs
-        for file in pdf_files:
+        for file in all_files:
             os.remove(os.path.join(UPLOAD_DIR, file))
-
         st.warning("All documents and in-memory data have been deleted.")
-
-
-# def main_index(llm):
-#     os.makedirs(UPLOAD_DIR, exist_ok=True)
-#     st.title("📄 PDF Submission")
-#     st.markdown("""
-# This page allows you to **submit medical PDFs related to migraines**, such as:
-# - Clinical summaries
-# - Lab results
-# - Medication instruction leaflets
-#
-# The assistant will extract relevant content from your PDFs for later search and analysis.
-# """)
-#
-#     uploaded_files = st.file_uploader("Upload Documents", type=["pdf"], accept_multiple_files=True)
-#
-#     if uploaded_files:
-#         if st.button("Upload"):
-#             uploaded_names = []
-#
-#             for uploaded_file in uploaded_files:
-#                 save_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
-#                 with open(save_path, "wb") as f:
-#                     f.write(uploaded_file.getbuffer())
-#                 uploaded_names.append(uploaded_file.name)
-#
-#             num_new_docs = call_index(llm, uploaded_names)
-#
-#             if num_new_docs > 0:
-#                 st.success(f"Uploaded and indexed {len(uploaded_names)} new document(s).")
-#             else:
-#                 st.info("All uploaded documents were already indexed.")
-#
-#     # Display current uploaded PDFs
-#     st.markdown("### 🗂️ Current Documents:")
-#
-#     pdf_files = [f for f in os.listdir(UPLOAD_DIR) if f.lower().endswith(".pdf")]
-#     if pdf_files:
-#         for file in sorted(pdf_files):
-#             st.markdown(f"- `{file}`")
-#     else:
-#         st.info("No uploaded documents found.")
-#
-#     # --- Delete Documents Section ---
-#     if st.button("🗑️ Delete Documents"):
-#         st.session_state.show_delete_confirm = True
-#
-#     if st.session_state.get("show_delete_confirm", False):
-#         st.warning("Are you sure you want to delete all uploaded documents and the in-memory data? This action cannot be undone.")
-#         col1, col2 = st.columns(2)
-#
-#         with col1:
-#             if st.button("Confirm Delete"):
-#                 # Delete in-memory docs file
-#                 if os.path.exists(BUFFER_DOCS_PATH):
-#                     os.remove(BUFFER_DOCS_PATH)
-#                 # Delete uploaded PDFs
-#                 for file in os.listdir(UPLOAD_DIR):
-#                     if file.lower().endswith(".pdf"):
-#                         os.remove(os.path.join(UPLOAD_DIR, file))
-#                 st.success("All documents and in-memory data have been deleted.")
-#                 st.session_state.show_delete_confirm = False
-#
-#         with col2:
-#             if st.button("Cancel"):
-#                 st.session_state.show_delete_confirm = False
+        # time.sleep(1.2)
+        # st.rerun()
 
 
 # -----------------------------
