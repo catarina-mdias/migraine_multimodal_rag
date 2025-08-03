@@ -1,5 +1,6 @@
 import os
 import streamlit as st
+import pickle
 
 from langchain_core.documents import Document
 
@@ -15,6 +16,15 @@ from utils.utils import (
 )
 
 # -----------------------------
+# Load previously saved docs
+# -----------------------------
+def load_existing_docs(pickle_path):
+    if os.path.exists(pickle_path):
+        with open(pickle_path, "rb") as f:
+            return pickle.load(f)
+    return []
+
+# -----------------------------
 # Helper: Process a single PDF file
 # -----------------------------
 def process_pdf_to_documents(pdf_path: str, llm) -> list[Document]:
@@ -22,7 +32,7 @@ def process_pdf_to_documents(pdf_path: str, llm) -> list[Document]:
     base64_images = pdf_to_base64_images(pdf_path)
 
     for i, img in enumerate(base64_images):
-        with st.spinner(f"{pdf_path} - Extracting text from page {i+1}..."):
+        with st.spinner(f"{os.path.basename(pdf_path)} - Extracting text from page {i+1}..."):
             text = base64_image_to_markdown(img, llm)
             docs.append(Document(
                 page_content=text,
@@ -34,22 +44,25 @@ def process_pdf_to_documents(pdf_path: str, llm) -> list[Document]:
 # Indexing Entry Point
 # -----------------------------
 def call_index(llm):
-    try:
-        os.remove(BUFFER_DOCS_PATH)
-    except FileNotFoundError:
-        pass
+    existing_docs = load_existing_docs(BUFFER_DOCS_PATH)
+    existing_sources = {doc.metadata.get("source").split(" - ")[0] for doc in existing_docs}
 
     pdf_files = [f for f in os.listdir(UPLOAD_DIR) if f.lower().endswith(".pdf")]
-    all_docs = []
+    all_new_docs = []
 
     for pdf_file in pdf_files:
-        path = os.path.join(UPLOAD_DIR, pdf_file)
-        st.info(f"Processing `{pdf_file}`")
-        docs = process_pdf_to_documents(path, llm)
-        all_docs.extend(docs)
+        if pdf_file in existing_sources:
+            continue  # Skip files already indexed
 
+        path = os.path.join(UPLOAD_DIR, pdf_file)
+        docs = process_pdf_to_documents(path, llm)
+        all_new_docs.extend(docs)
+
+    # Combine and save
+    all_docs = existing_docs + all_new_docs
     save_to_pickle(all_docs, BUFFER_DOCS_PATH)
-    st.success(f"Indexed {len(all_docs)} PDF page(s).")
+
+    return len(all_new_docs)
 
 # -----------------------------
 # Streamlit Interface
@@ -66,26 +79,31 @@ This page allows you to **submit medical PDFs related to migraines**, such as:
 The assistant will extract relevant content from your PDFs for later search and analysis.
 """)
 
-    uploaded_file = st.file_uploader("Upload a PDF file", type=["pdf"])
+    # Allow multiple file uploads
+    uploaded_files = st.file_uploader("Upload Documents", type=["pdf"], accept_multiple_files=True)
 
-    if uploaded_file is not None:
-        st.success(f"Uploaded: {uploaded_file.name} ({uploaded_file.size / 1024:.2f} KB)")
-        if st.button("Save PDF"):
-            save_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
-            with open(save_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            st.info(f"File saved to: `{save_path}`")
+    if uploaded_files:
+        if st.button("Upload"):
+            for uploaded_file in uploaded_files:
+                save_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
+                with open(save_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
 
+            num_new_docs = call_index(llm)
+
+            if num_new_docs > 0:
+                st.success(f"Uploaded and indexed {len(uploaded_files)} new document(s).")
+            else:
+                st.info("No new PDFs to index. All documents are already processed.")
+
+    # Display current uploaded PDFs
     pdf_files = [f for f in os.listdir(UPLOAD_DIR) if f.lower().endswith(".pdf")]
     if pdf_files:
-        st.write(f"Found {len(pdf_files)} PDF file(s):")
+        st.markdown("### 🗂️ Current Documents:")
         for file in sorted(pdf_files):
-            st.markdown(f"- 📄 `{file}`")
+            st.write(f"- {file}")
     else:
-        st.info("No PDF files found in the upload folder.")
-
-    if st.button("Index PDF Files"):
-        call_index(llm)
+        st.info("No uploaded documents found.")
 
 # -----------------------------
 # Entry Point
