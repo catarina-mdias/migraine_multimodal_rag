@@ -9,6 +9,7 @@ from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_core.documents import Document
 from langgraph.graph import START, StateGraph
 from langchain import hub
+from mutagen.mp3 import MP3
 
 from utils.constants import (
     api_key, LLM_MODEL, EMBEDDING_MODEL, BUFFER_DOCS_PATH,
@@ -16,7 +17,7 @@ from utils.constants import (
 )
 from utils.utils import (
     save_to_pickle, load_from_pickle, pdf_to_base64_images,
-    base64_image_to_markdown
+    base64_image_to_markdown, autoplay_audio
 )
 
 # Initialize LLM and Embeddings
@@ -69,14 +70,46 @@ def tts_util(input_text):
     return speech_file_path
 
 
-def autoplay_audio(file_path):
+def get_audio_duration(file_path):
+    """Get audio file duration in seconds"""
+    try:
+        audio = MP3(file_path)
+        return audio.info.length
+    except:
+        # Fallback: estimate based on file size (rough approximation)
+        file_size = os.path.getsize(file_path)
+        # Rough estimate: 1 MB ≈ 60 seconds for MP3
+        return max(3, file_size / (1024 * 1024) * 60)
+
+
+def delayed_rerun(delay_seconds):
+    """Trigger a rerun after specified delay using JavaScript"""
+    delay_ms = int(delay_seconds * 1000)
+    components.html(f"""
+        <script>
+        setTimeout(function() {{
+            window.parent.postMessage({{type: 'streamlit:rerun'}}, '*');
+        }}, {delay_ms});
+        </script>
+    """, height=0)
+
+
+def create_audio_player(file_path, message_index):
+    """Create a small audio player button"""
     with open(file_path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
+
+    # Create a unique key for this audio player
+    audio_key = f"audio_player_{message_index}"
+
+    # Small replay button
+    if st.button("🔊", key=audio_key, help="Replay audio"):
+        # Play the audio
         audio_html = f"""
             <audio autoplay>
                 <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
             </audio>"""
-        components.html(audio_html, height=100)
+        components.html(audio_html, height=0)
 
 
 def stt_util(audio):
@@ -103,7 +136,11 @@ def main_chat():
 
     if "last_processed_audio" not in st.session_state:
         st.session_state.last_processed_audio = None
-    if "processing_audio" not in st.session_state:
+    if "ready_for_next_audio" not in st.session_state:
+        st.session_state.ready_for_next_audio = True
+    if "audio_files" not in st.session_state:
+        st.session_state.audio_files = []
+    if "processing_audio" not in st.session_state:  # <--- Add this line
         st.session_state.processing_audio = False
 
     # Controls row with reset button and audio toggle
@@ -120,14 +157,16 @@ def main_chat():
             st.session_state.messages = [{"role": "assistant", "content": "Hi there! How can I help you today?"}]
             st.session_state.input_mode = "text"
             st.session_state.last_processed_audio = None
+            st.session_state.ready_for_next_audio = True
             st.session_state.processing_audio = False
+            st.session_state.audio_files = []
             st.rerun()
 
     with col2:
         audio_mode = st.toggle("🎙️ Audio Mode", value=(st.session_state.input_mode == "audio"))
         if audio_mode != (st.session_state.input_mode == "audio"):
             st.session_state.input_mode = "audio" if audio_mode else "text"
-            st.session_state.processing_audio = False
+            st.session_state.ready_for_next_audio = True
 
     # Auto index document on load
     if not st.session_state.indexing:
@@ -143,9 +182,22 @@ def main_chat():
             st.session_state.indexing = True
 
     # Display message history
-    for message in st.session_state.messages:
+    for i, message in enumerate(st.session_state.messages):
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+            # For assistant messages in audio mode, show replay button
+            if (message["role"] == "assistant" and
+                    st.session_state.input_mode == "audio" and
+                    i < len(st.session_state.audio_files) and
+                    st.session_state.audio_files[i] and
+                    os.path.exists(st.session_state.audio_files[i])):
+
+                col1, col2 = st.columns([0.1, 0.9])
+                with col1:
+                    create_audio_player(st.session_state.audio_files[i], i)
+                with col2:
+                    st.markdown(message["content"])
+            else:
+                st.markdown(message["content"])
 
     # Handle text input mode
     if st.session_state.input_mode == "text":
@@ -177,7 +229,7 @@ def main_chat():
                     prompt_text = stt_util(st.session_state.last_processed_audio)
 
                 if prompt_text.strip():  # Only proceed if we got valid text
-                    # Add user message (no transcript shown for user input)
+                    # Add user message
                     with st.chat_message("user"):
                         st.markdown(prompt_text)
                     st.session_state.messages.append({"role": "user", "content": prompt_text})
@@ -190,6 +242,9 @@ def main_chat():
                         audio_path = tts_util(response['answer'])
                         autoplay_audio(audio_path)
 
+                        # Store audio file for replay functionality
+                        st.session_state.audio_files.append(audio_path)
+
                         # Display response
                         with st.chat_message("assistant"):
                             st.write_stream(response_generator())
@@ -201,10 +256,14 @@ def main_chat():
 
                         st.session_state.messages.append({"role": "assistant", "content": response['answer']})
 
-                # Reset processing state - add a delay to ensure audio finishes
-                time.sleep(0.5)  # Small delay to let audio/streaming complete
-                st.session_state.processing_audio = False
-                st.session_state.last_processed_audio = None
+                        # Get audio duration and set delayed rerun
+                        audio_duration = get_audio_duration(audio_path)
+                        delay = audio_duration + 2  # Add 2 seconds buffer
+
+                        # Reset processing state and trigger delayed rerun
+                        st.session_state.processing_audio = False
+                        st.session_state.last_processed_audio = None
+                        delayed_rerun(delay)
         else:
             # Show audio input when not processing
             # st.markdown("### 🎙️ Speak your question below")
