@@ -133,15 +133,20 @@ def main_chat():
         st.session_state.messages = [{"role": "assistant", "content": "Hi there! How can I help you today?"}]
     if "input_mode" not in st.session_state:
         st.session_state.input_mode = "text"
-
     if "last_processed_audio" not in st.session_state:
         st.session_state.last_processed_audio = None
     if "ready_for_next_audio" not in st.session_state:
         st.session_state.ready_for_next_audio = True
     if "audio_files" not in st.session_state:
         st.session_state.audio_files = []
-    if "processing_audio" not in st.session_state:  # <--- Add this line
+    if "processing_audio" not in st.session_state:
         st.session_state.processing_audio = False
+    if "show_audio_input" not in st.session_state:
+        st.session_state.show_audio_input = True  # Controls showing the audio input box
+
+    # After rerun from delayed rerun, enable audio input again
+    if not st.session_state.processing_audio and not st.session_state.show_audio_input:
+        st.session_state.show_audio_input = True
 
     # Controls row with reset button and audio toggle
     col1, col2 = st.columns([2, 1])
@@ -160,6 +165,7 @@ def main_chat():
             st.session_state.ready_for_next_audio = True
             st.session_state.processing_audio = False
             st.session_state.audio_files = []
+            st.session_state.show_audio_input = True
             st.rerun()
 
     with col2:
@@ -167,6 +173,7 @@ def main_chat():
         if audio_mode != (st.session_state.input_mode == "audio"):
             st.session_state.input_mode = "audio" if audio_mode else "text"
             st.session_state.ready_for_next_audio = True
+            st.session_state.show_audio_input = True  # Reset to show input box when switching modes
 
     # Auto index document on load
     if not st.session_state.indexing:
@@ -218,18 +225,12 @@ def main_chat():
 
     # Handle audio input mode
     else:
-        # Don't show audio input if currently processing
         if st.session_state.processing_audio:
-            # st.info("Processing your audio message...")
-
-            # Process the audio here when processing flag is set
             if st.session_state.last_processed_audio:
-                # Process the audio
                 with st.spinner("Transcribing..."):
                     prompt_text = stt_util(st.session_state.last_processed_audio)
 
                 if prompt_text.strip():  # Only proceed if we got valid text
-                    # Add user message
                     with st.chat_message("user"):
                         st.markdown(prompt_text)
                     st.session_state.messages.append({"role": "user", "content": prompt_text})
@@ -245,7 +246,6 @@ def main_chat():
                         # Store audio file for replay functionality
                         st.session_state.audio_files.append(audio_path)
 
-                        # Display response
                         with st.chat_message("assistant"):
                             st.write_stream(response_generator())
 
@@ -260,19 +260,26 @@ def main_chat():
                         audio_duration = get_audio_duration(audio_path)
                         delay = audio_duration + 2  # Add 2 seconds buffer
 
+                        # Hide audio input box during playback
+                        st.session_state.show_audio_input = False
+
                         # Reset processing state and trigger delayed rerun
                         st.session_state.processing_audio = False
                         st.session_state.last_processed_audio = None
                         delayed_rerun(delay)
         else:
-            # Show audio input when not processing
-            # st.markdown("### 🎙️ Speak your question below")
-            audio = st.audio_input("Speak now")
+            # Show audio input only if allowed (after audio finished)
+            if st.session_state.show_audio_input:
+                audio = st.audio_input("Speak now")
 
-            if audio and audio != st.session_state.last_processed_audio:
-                st.session_state.processing_audio = True
-                st.session_state.last_processed_audio = audio
-                st.rerun()
+                if audio and audio != st.session_state.last_processed_audio:
+                    st.session_state.processing_audio = True
+                    st.session_state.last_processed_audio = audio
+                    st.session_state.show_audio_input = False  # Hide input while processing
+                    st.rerun()
+            else:
+                st.markdown("⏳ Please wait for the assistant to finish speaking before recording your question.")
+
 
 
 if __name__ == '__main__':
