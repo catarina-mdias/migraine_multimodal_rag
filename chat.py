@@ -26,16 +26,18 @@ client = OpenAI(api_key=api_key)
 vector_store = InMemoryVectorStore(embeddings)
 prompt = hub.pull("rlm/rag-prompt")
 
-# State for LangGraph
 from typing_extensions import TypedDict, List
+
 
 class State(TypedDict):
     question: str
     context: List[Document]
     answer: str
 
+
 def retrieve(state: State):
     return {"context": vector_store.similarity_search(state["question"], k=TOP_K)}
+
 
 def generate(state: State):
     context_text = "\n\n".join(doc.page_content for doc in state["context"])
@@ -43,27 +45,24 @@ def generate(state: State):
     response = llm.invoke(messages)
     return {"answer": response.content}
 
+
 def response_generator():
     for word in st.session_state.temp_answer.split():
         yield word + " "
         time.sleep(0.05)
 
+
 def tts_util(input_text):
     from datetime import datetime
-
-    # Create 'audio' directory if it doesn't exist
     audio_dir = "audio"
     os.makedirs(audio_dir, exist_ok=True)
-
-    # Generate timestamped filename
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     speech_file_path = os.path.join(audio_dir, f"answer_{timestamp}.mp3")
 
-    # Create audio using OpenAI API
     with client.audio.speech.with_streaming_response.create(
-        model="gpt-4o-mini-tts",
-        voice="alloy",
-        input=input_text
+            model="gpt-4o-mini-tts",
+            voice="alloy",
+            input=input_text
     ) as response:
         response.stream_to_file(speech_file_path)
 
@@ -79,33 +78,60 @@ def autoplay_audio(file_path):
             </audio>"""
         components.html(audio_html, height=100)
 
+
 def stt_util(audio):
     if not audio:
         return ""
     return client.audio.transcriptions.create(model="whisper-1", file=audio).text
 
+
 def main_chat():
     st.markdown("<style>#MainMenu, footer, header {visibility: hidden;}</style>", unsafe_allow_html=True)
     st.title("Tutai Bot - Write and Speak!")
 
-    # Show session state
-    if "last_audio" not in st.session_state:
-        st.session_state.last_audio = None
+    # Initialize session state variables
     if 'temp_answer' not in st.session_state:
         st.session_state.temp_answer = ''
-    if "show_voice" not in st.session_state:
-        st.session_state.show_voice = False
     if "graph" not in st.session_state:
         st.session_state.graph = None
     if "indexing" not in st.session_state:
         st.session_state.indexing = False
     if "messages" not in st.session_state:
         st.session_state.messages = [{"role": "assistant", "content": "Hi there! How can I help you today?"}]
+    if "input_mode" not in st.session_state:
+        st.session_state.input_mode = "text"
 
-    st.checkbox("Voice enabled", key="show_voice")
+    if "last_processed_audio" not in st.session_state:
+        st.session_state.last_processed_audio = None
+    if "processing_audio" not in st.session_state:
+        st.session_state.processing_audio = False
 
-    if st.button("Index and Vector Store document") and not st.session_state.indexing:
-        with st.spinner("Loading and indexing..."):
+    # Controls row with reset button and audio toggle
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        if st.button("🔄 Reset Session"):
+            # Clear all session state except essential ones
+            keys_to_keep = ["graph", "indexing"]  # Keep these to avoid reloading
+            keys_to_clear = [key for key in st.session_state.keys() if key not in keys_to_keep]
+            for key in keys_to_clear:
+                del st.session_state[key]
+            # Reset essential variables
+            st.session_state.messages = [{"role": "assistant", "content": "Hi there! How can I help you today?"}]
+            st.session_state.input_mode = "text"
+            st.session_state.last_processed_audio = None
+            st.session_state.processing_audio = False
+            st.rerun()
+
+    with col2:
+        audio_mode = st.toggle("🎙️ Audio Mode", value=(st.session_state.input_mode == "audio"))
+        if audio_mode != (st.session_state.input_mode == "audio"):
+            st.session_state.input_mode = "audio" if audio_mode else "text"
+            st.session_state.processing_audio = False
+
+    # Auto index document on load
+    if not st.session_state.indexing:
+        with st.spinner("Loading..."):
             docs = load_from_pickle(BUFFER_DOCS_PATH)
             from langchain_text_splitters import RecursiveCharacterTextSplitter
             splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
@@ -115,52 +141,79 @@ def main_chat():
             graph.add_edge(START, "retrieve")
             st.session_state.graph = graph.compile()
             st.session_state.indexing = True
-            st.info(f"Indexed {len(splits)} document chunks.")
 
+    # Display message history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if user_input := st.chat_input("How can I help?"):
-        with st.chat_message("user"):
-            st.markdown(user_input)
-        st.session_state.messages.append({"role": "user", "content": user_input})
+    # Handle text input mode
+    if st.session_state.input_mode == "text":
+        if user_input := st.chat_input("How can I help?"):
+            with st.chat_message("user"):
+                st.markdown(user_input)
+            st.session_state.messages.append({"role": "user", "content": user_input})
 
-        with st.chat_message("assistant"):
-            response = st.session_state.graph.invoke({"question": user_input})
-            st.session_state.temp_answer = response['answer']
-            st.write_stream(response_generator())
-            with st.expander("Sources"):
-                for d in response['context']:
-                    st.write(f"**{d.metadata['source']}**")
-                    st.markdown(d.page_content)
-            st.session_state.messages.append({"role": "assistant", "content": response['answer']})
-
-    if st.session_state.show_voice:
-        audio = st.audio_input("Speak your question")
-
-        # Only process new audio
-        if audio and audio != st.session_state.last_audio:
-            with st.spinner("Transcribing..."):
-                prompt = stt_util(audio)
-
-            st.markdown(f"**Transcript:** {prompt}")
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            st.session_state.last_audio = audio  # Mark audio as processed
-
-            with st.spinner("Answering..."):
-                response = st.session_state.graph.invoke({"question": prompt})
+            with st.chat_message("assistant"):
+                response = st.session_state.graph.invoke({"question": user_input})
                 st.session_state.temp_answer = response['answer']
-                audio_path = tts_util(response['answer'])
-                autoplay_audio(audio_path)
+                st.write_stream(response_generator())
+                with st.expander("Sources"):
+                    for d in response['context']:
+                        st.write(f"**{d.metadata['source']}**")
+                        st.markdown(d.page_content)
+                st.session_state.messages.append({"role": "assistant", "content": response['answer']})
 
-                with st.chat_message("assistant"):
-                    st.write_stream(response_generator())
-                    with st.expander("Sources"):
-                        for d in response['context']:
-                            st.write(f"**{d.metadata['source']}**")
-                            st.markdown(d.page_content)
-                    st.session_state.messages.append({"role": "assistant", "content": response['answer']})
+    # Handle audio input mode
+    else:
+        # Don't show audio input if currently processing
+        if st.session_state.processing_audio:
+            # st.info("Processing your audio message...")
+
+            # Process the audio here when processing flag is set
+            if st.session_state.last_processed_audio:
+                # Process the audio
+                with st.spinner("Transcribing..."):
+                    prompt_text = stt_util(st.session_state.last_processed_audio)
+
+                if prompt_text.strip():  # Only proceed if we got valid text
+                    # Add user message (no transcript shown for user input)
+                    with st.chat_message("user"):
+                        st.markdown(prompt_text)
+                    st.session_state.messages.append({"role": "user", "content": prompt_text})
+
+                    with st.spinner("Generating answer..."):
+                        response = st.session_state.graph.invoke({"question": prompt_text})
+                        st.session_state.temp_answer = response['answer']
+
+                        # Generate and play audio
+                        audio_path = tts_util(response['answer'])
+                        autoplay_audio(audio_path)
+
+                        # Display response
+                        with st.chat_message("assistant"):
+                            st.write_stream(response_generator())
+
+                            with st.expander("Sources"):
+                                for d in response['context']:
+                                    st.write(f"**{d.metadata['source']}**")
+                                    st.markdown(d.page_content)
+
+                        st.session_state.messages.append({"role": "assistant", "content": response['answer']})
+
+                # Reset processing state - add a delay to ensure audio finishes
+                time.sleep(0.5)  # Small delay to let audio/streaming complete
+                st.session_state.processing_audio = False
+                st.session_state.last_processed_audio = None
+        else:
+            # Show audio input when not processing
+            # st.markdown("### 🎙️ Speak your question below")
+            audio = st.audio_input("Speak now")
+
+            if audio and audio != st.session_state.last_processed_audio:
+                st.session_state.processing_audio = True
+                st.session_state.last_processed_audio = audio
+                st.rerun()
 
 
 if __name__ == '__main__':
