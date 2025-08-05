@@ -129,14 +129,14 @@ def main_chat():
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        if st.button("🔄 Reset Session"):
+        if st.button("Reset Session"):
             for key in list(st.session_state.keys()):
                 if key not in ["graph", "indexing"]:
                     del st.session_state[key]
             st.rerun()
 
     with col2:
-        audio_mode = st.toggle("🎙️ Audio Mode", value=(st.session_state.input_mode == "audio"))
+        audio_mode = st.toggle("Audio Mode", value=(st.session_state.input_mode == "audio"))
         if not st.session_state.audio_mode_locked:  # Allow toggle only before locking
             st.session_state.input_mode = "audio" if audio_mode else "text"
 
@@ -182,7 +182,7 @@ def main_chat():
         # Always show record button
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            record_clicked = st.button("🎤 Record New Message", key="record_new", use_container_width=True)
+            record_clicked = st.button("Record New Message", key="record_new", use_container_width=True)
 
         if record_clicked:
             st.session_state.recording_state = "recording"

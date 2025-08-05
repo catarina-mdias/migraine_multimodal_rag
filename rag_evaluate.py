@@ -1,18 +1,13 @@
-import os
 import json
-import time
-import pickle
 import streamlit as st
 import pandas as pd
 import evaluate as ev
 
-from langchain_core.messages import HumanMessage
 from langgraph.graph import START, StateGraph
 from typing_extensions import TypedDict, List
 
 from utils.utils import (
     load_from_pickle,
-    clean_markdown_fences,
 )
 from utils.constants import (
     api_key, LLM_MODEL, EMBEDDING_MODEL, BUFFER_DOCS_PATH,
@@ -60,27 +55,26 @@ def generate(state: State):
     response = llm.invoke(messages)
     return {"answer": response.content}
 
-# Build RAG graph for retrieval + generation
-graph_builder = StateGraph(State).add_sequence([retrieve, generate])
-graph_builder.add_edge(START, "retrieve")
-rag_graph = graph_builder.compile()
+# Session state defaults
+defaults = {
+    "messages": [],  # You can replace with your default_messages
+    "input_mode": "text",
+    "audio_files": [],
+    "audio_mode_locked": False,
+    "recording_state": "ready",  # ready, recording, processing
+    "current_audio_input": None,
+    "last_processed_audio": None,
+    "processing_audio": False,
+    "show_audio_input": False,
+    "indexing": False,
+    "graph": None,
+    "temp_answer": '',
+}
 
-# Index documents automatically on startup
-@st.cache_data(show_spinner=False)
-def index_documents():
-    docs = load_from_pickle(BUFFER_DOCS_PATH)
-
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-        add_start_index=True,
-    )
-    all_splits = text_splitter.split_documents(docs)
-
-    vector_store.add_documents(documents=all_splits)
-    return len(all_splits)
+# Initialize session state
+for key, value in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
 
 def main_eval():
     st.title("Assistant Evaluator")
@@ -89,10 +83,22 @@ def main_eval():
     Using a set of test questions and answers (in JSON format), evaluate the bot using statistical and LLM evaluation metrics.
     """)
 
-    # Auto index documents
-    # with st.spinner("Indexing documents..."):
-    #     # num_chunks = index_documents()
-    #     # st.success(f"Indexed {num_chunks} document chunks.")
+    # Index documents using session state pattern
+    if not st.session_state.indexing:
+        with st.spinner("Loading..."):
+            docs = load_from_pickle(BUFFER_DOCS_PATH)
+            from langchain_text_splitters import RecursiveCharacterTextSplitter
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=CHUNK_SIZE,
+                chunk_overlap=CHUNK_OVERLAP,
+                add_start_index=True
+            )
+            splits = splitter.split_documents(docs)
+            vector_store.add_documents(splits)
+            graph = StateGraph(State).add_sequence([retrieve, generate])
+            graph.add_edge(START, "retrieve")
+            st.session_state.graph = graph.compile()
+            st.session_state.indexing = True
 
     # File uploader for Q&A JSON
     uploaded_file = st.file_uploader("Upload a Q&A JSON file", type=["json"])
@@ -103,11 +109,10 @@ def main_eval():
             questions = [item["question"] for item in gt_data]
             references = [item["answer"] for item in gt_data]
 
-            # Generate answers automatically
-            # st.info("Generating answers...")
+            # Generate answers automatically using session state graph
             all_responses = []
             for question in questions:
-                response = rag_graph.invoke({"question": question})
+                response = st.session_state.graph.invoke({"question": question})
                 answer = response.get("answer", "") if isinstance(response, dict) else str(response)
                 all_responses.append(answer)
 
@@ -146,7 +151,7 @@ def main_eval():
                 st.subheader("Evaluation Results")
                 st.dataframe(eval_df, use_container_width=True)
 
-                st.markdown("### 🔍 Evaluation Summary")
+                st.markdown("### Evaluation Summary")
                 st.write(f"**Average ROUGE-1:** {sum(rouge_1_scores)/len(rouge_1_scores):.4f}")
                 st.write(f"**Average ROUGE-2:** {sum(rouge_2_scores)/len(rouge_2_scores):.4f}")
                 st.write(f"**Average METEOR:** {sum(meteor_scores)/len(meteor_scores):.4f}")
@@ -174,7 +179,7 @@ def main_eval():
                     st.subheader("LLM Evaluation Results")
                     st.dataframe(eval_df, use_container_width=True)
 
-                    st.markdown("### 🔍 Evaluation Summary")
+                    st.markdown("### Evaluation Summary")
                     st.write(f"**Average Score:** {sum(scores)/len(scores):.4f}")
 
         except Exception as e:
