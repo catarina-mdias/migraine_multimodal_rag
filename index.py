@@ -99,7 +99,7 @@ def call_index(llm, just_uploaded_files: list[str]):
 # -----------------------------
 def main_index(llm):
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    st.title("Document & Image Submission")
+    st.title("Upload Documents")
 
     st.markdown("""
 This page allows you to **submit medical PDFs and JPG images related to migraines**, such as:

@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.set_page_config(page_title="Migraine Assistant", layout="wide")
+st.set_page_config(page_title="BrainEase", layout="wide")
 
 from langchain_openai import ChatOpenAI
 from utils.constants import api_key, LLM_MODEL
@@ -13,9 +13,25 @@ if 'llm' not in st.session_state:
 def add_header():
     st.markdown("""
         <div style='text-align:center; padding: 1rem 0;'>
-            <h1>🧠 Migraine Assistant</h1>
+            <h1>🧠 BrainEase </h1>
         </div>
     """, unsafe_allow_html=True)
+
+
+def home_page():
+    add_header()
+    st.markdown("""
+        ### Welcome to BrainEase
+
+        This app helps you navigate your migraines, giving you the support you need. You can:
+
+        - Upload relevant medical documents or migraine diaries
+        - Ask questions via text or voice 
+        - Evaluate the assistant’s performance 
+
+        ---
+        Select a feature from the sidebar to get started!
+    """)
 
 
 # Wrapper functions with lazy imports
@@ -40,10 +56,10 @@ def evaluate_page():
 
 # Navigation using Streamlit's new API
 page = st.navigation([
-    st.Page(upload_pdfs_page, title="📄 Upload PDFs"),
-    # st.Page(upload_images_page, title="🖼️ Upload Images"),
-    st.Page(chatbot_page, title="💬 Chatbot"),
-    st.Page(evaluate_page, title="📊 Evaluate"),
+    st.Page(home_page, title="Home Page"),
+    st.Page(chatbot_page, title="Migraine Assistant"),
+    st.Page(upload_pdfs_page, title="Upload Documents"),
+    st.Page(evaluate_page, title="Evaluate"),
 ])
 
 page.run()
