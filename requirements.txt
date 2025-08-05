@@ -9,6 +9,7 @@ langchain==0.3.26
 langchain-community==0.3.27
 langchain-text-splitters==0.3.8
 langgraph==0.5.3
+mutagen==1.47.0
 
 blosc2==3.6.1
 Cython==3.1.2
