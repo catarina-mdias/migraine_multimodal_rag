@@ -14,7 +14,7 @@ BUFFER_DOCS_PATH = os.path.join(BUFFER_DIR, "docs.pkl")
 load_dotenv(dotenv_path=".env", override=True)
 api_key = os.getenv("OPENAI_API_KEY")
 
-LLM_MODEL = "gpt-4o-mini"
+LLM_MODEL = "gpt-4o"
 LLM_EVAL_MODEL = "gpt-4.1-mini"  # used in eval script
 EMBEDDING_MODEL = "text-embedding-3-large"
 
@@ -23,7 +23,7 @@ EMBEDDING_MODEL = "text-embedding-3-large"
 # -------------------------
 TOP_K = 5
 CHUNK_SIZE = 5000
-CHUNK_OVERLAP = 2000
+CHUNK_OVERLAP = 1000
 
 # -------------------------
 # Audio Settings
