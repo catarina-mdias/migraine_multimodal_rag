@@ -21,7 +21,6 @@ from langchain_core.documents import Document
 from langchain import hub
 from openai import OpenAI
 
-import deepeval
 from deepeval.metrics import GEval
 from deepeval.test_case import LLMTestCaseParams, LLMTestCase
 from deepeval import evaluate
