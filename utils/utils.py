@@ -62,19 +62,20 @@ def clean_markdown_fences(text: str) -> str:
     """Remove triple backticks and optional language specifier from markdown."""
     return re.sub(r"```(?:\w+)?\n?", "", text).strip()
 
+
 def base64_image_to_markdown(base64_str: str, llm) -> str:
-    """Send base64 image and prompt to LLM and return markdown output."""
-    message = HumanMessage(
+    image_message = HumanMessage(
         content=[
-            {"type": "text", "text": QUERY_OCR},
             {
                 "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{base64_str}"},
-            },
-        ],
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_str}"  # or image/png if PNG
+                }
+            }
+        ]
     )
-    response = llm.invoke([message])
-    return clean_markdown_fences(response.content)
+    response = llm.invoke([image_message])
+    return response.content
 
 
 # -------------------------

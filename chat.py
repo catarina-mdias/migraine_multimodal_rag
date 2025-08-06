@@ -142,16 +142,20 @@ def main_chat():
 
     # --- Load docs (once) ---
     if not st.session_state.indexing:
-        with st.spinner("Loading..."):
-            docs = load_from_pickle(BUFFER_DOCS_PATH)
-            from langchain_text_splitters import RecursiveCharacterTextSplitter
-            splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
-            splits = splitter.split_documents(docs)
-            vector_store.add_documents(splits)
-            graph = StateGraph(State).add_sequence([retrieve, generate])
-            graph.add_edge(START, "retrieve")
-            st.session_state.graph = graph.compile()
-            st.session_state.indexing = True
+        if not os.path.exists(BUFFER_DOCS_PATH):
+            st.warning("⚠️ No documents found. Please go to the **Upload PDFs** page and upload your documents first.")
+            st.stop()
+        else:
+            with st.spinner("Loading..."):
+                docs = load_from_pickle(BUFFER_DOCS_PATH)
+                from langchain_text_splitters import RecursiveCharacterTextSplitter
+                splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+                splits = splitter.split_documents(docs)
+                vector_store.add_documents(splits)
+                graph = StateGraph(State).add_sequence([retrieve, generate])
+                graph.add_edge(START, "retrieve")
+                st.session_state.graph = graph.compile()
+                st.session_state.indexing = True
 
     # --- Message history ---
     for message in st.session_state.messages:

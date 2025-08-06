@@ -2,6 +2,7 @@ import json
 import streamlit as st
 import pandas as pd
 import evaluate as ev
+import os
 
 from langgraph.graph import START, StateGraph
 from typing_extensions import TypedDict, List
@@ -85,20 +86,24 @@ def main_eval():
 
     # Index documents using session state pattern
     if not st.session_state.indexing:
-        with st.spinner("Loading..."):
-            docs = load_from_pickle(BUFFER_DOCS_PATH)
-            from langchain_text_splitters import RecursiveCharacterTextSplitter
-            splitter = RecursiveCharacterTextSplitter(
-                chunk_size=CHUNK_SIZE,
-                chunk_overlap=CHUNK_OVERLAP,
-                add_start_index=True
-            )
-            splits = splitter.split_documents(docs)
-            vector_store.add_documents(splits)
-            graph = StateGraph(State).add_sequence([retrieve, generate])
-            graph.add_edge(START, "retrieve")
-            st.session_state.graph = graph.compile()
-            st.session_state.indexing = True
+        if not os.path.exists(BUFFER_DOCS_PATH):
+            st.warning("⚠️ No documents found. Please go to the **Upload PDFs** page and upload your documents first.")
+            st.stop()
+        else:
+            with st.spinner("Loading..."):
+                docs = load_from_pickle(BUFFER_DOCS_PATH)
+                from langchain_text_splitters import RecursiveCharacterTextSplitter
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=CHUNK_SIZE,
+                    chunk_overlap=CHUNK_OVERLAP,
+                    add_start_index=True
+                )
+                splits = splitter.split_documents(docs)
+                vector_store.add_documents(splits)
+                graph = StateGraph(State).add_sequence([retrieve, generate])
+                graph.add_edge(START, "retrieve")
+                st.session_state.graph = graph.compile()
+                st.session_state.indexing = True
 
     # File uploader for Q&A JSON
     uploaded_file = st.file_uploader("Upload a Q&A JSON file", type=["json"])
