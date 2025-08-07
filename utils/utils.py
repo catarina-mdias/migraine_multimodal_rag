@@ -64,8 +64,9 @@ def clean_markdown_fences(text: str) -> str:
 
 
 def base64_image_to_markdown(base64_str: str, llm) -> str:
-    image_message = HumanMessage(
+    message = HumanMessage(
         content=[
+            {"type": "text", "text": QUERY_OCR},
             {
                 "type": "image_url",
                 "image_url": {
@@ -74,8 +75,9 @@ def base64_image_to_markdown(base64_str: str, llm) -> str:
             }
         ]
     )
-    response = llm.invoke([image_message])
-    return response.content
+    response_temp = llm.invoke([message])
+    response = clean_markdown_fences(response_temp.content)
+    return response
 
 
 # -------------------------
