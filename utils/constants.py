@@ -30,7 +30,7 @@ CHUNK_OVERLAP = 1000
 # -------------------------
 TTS_OUTPUT_PATH = "answer.mp3"
 TTS_MODEL = "gpt-4o-mini-tts"
-TTS_VOICE = "alloy"
+TTS_VOICE = "ash"
 
 # -------------------------
 # Prompt for OCR to Markdown
